@@ -259,6 +259,14 @@ const adminOk=()=>{const t=+get('gogiya_admin_t',0);return get('gogiya_admin',fa
 let admin=adminOk();
 const blank=()=>({date:today(),time:'',name:'',tel:'',pax:2,tables:[],req:[],memo:'',drinks:{},menu:{},opener:false,drinksT:'',menuT:'',drinksO:null,menuO:null});
 cur=blank();
+/* 작성 중인 예약 자동 저장 (오늘 하루 유지 · 앱을 나갔다 와도 다시 고를 필요 없음) */
+const DKEY='gogiya_visit_draft';
+function saveDraft(){put(DKEY,{day:today(),editId,cur})}
+function clearDraft(){try{localStorage.removeItem(DKEY)}catch(e){}}
+(function(){const dr=get(DKEY,null);
+  if(dr&&dr.day===today()&&dr.cur&&admin){cur=Object.assign(blank(),dr.cur);
+    editId=dr.editId&&list.some(r=>r.id===dr.editId)?dr.editId:null;}
+  else clearDraft();})();
 
 function fmtDate(s){const [y,m,d]=s.split('-').map(Number);const tag=s===today()?' 오늘':s===plus(1)?' 내일':'';return `${m}/${d}(${DOW[new Date(y,m-1,d).getDay()]})${tag}`}
 function fmtTime(t){if(!t)return '시간 미정';const [h,m]=t.split(':').map(Number);return `${h<12?'오전':'오후'} ${h%12||12}시${m?' '+m+'분':''}`}
@@ -382,8 +390,13 @@ async function floorFile(date,focus,staff,fname){
   const b=await new Promise(res=>c.toBlob(res,'image/png'));return b?new File([b],fname,{type:'image/png'}):null;
 }
 function guestMsg(r){
-  return `[최우영고기야] ${r.name}님, 예약 확인 안내드립니다 😊\n\n📅 ${fmtDate(r.date).replace(/ (오늘|내일)$/,'')} ${fmtTime(r.time)}\n👥 ${r.pax}명`+((r.tables||[]).length?` · ${r.tables.slice().sort((a,b)=>a-b).join(', ')}번 테이블 (자리 안내 사진 참고)`:'')+
-    `\n\n고기 굽는 시간이 있어, 미리 드실 메뉴를 알려주시면 도착하실 때 맞춰 준비해 드릴게요.\n오시는 길 조심히 오세요. 감사합니다!`;
+  const [y,m,d]=r.date.split('-').map(Number),dw=DOW[new Date(y,m-1,d).getDay()];
+  const hasT=(r.tables||[]).length>0;
+  return `안녕하세요. ${r.name}님, 예약 확인했습니다.\n`+
+    `${m}월 ${d}일(${dw}) ${fmtTime(r.time)}, ${r.pax}명으로 예약해드렸습니다.\n`+
+    `\n`+(hasT?`${r.tables.slice().sort((a,b)=>a-b).join(', ')}번 테이블(사진 참고)로 준비해두겠습니다.\n`:`자리 미리 준비해두겠습니다.\n`)+
+    `인원이나 일정에 변동이 있으시면 연락 부탁드립니다.\n\n`+
+    `정성껏 준비하겠습니다. 감사합니다.`;
 }
 const canFiles=f=>!!(f&&navigator.canShare&&navigator.canShare({files:[f]}));
 async function sendGuest(r){
@@ -419,8 +432,9 @@ function drawPO(){
     ptRow(g)+PO[g].map(([gl,items])=>`<div class="pg">${gl}</div>`+items.map(([n,en])=>{const c=(cur[g]||{})[n]||0;
       return `<div class="pi${c?' has':''}"><span class="nm">${n}<span class="en">${en}</span></span><span class="ps"><button data-g="${g}" data-n="${n}" data-d="-1">−</button><b>${c}${unitOf(g,n)}</b><button data-g="${g}" data-n="${n}" data-d="1">＋</button></span></div>`}).join('')).join('')).join('');
   $('opener').classList.toggle('on',!!cur.opener);
+  if(typeof saveDraft==='function')saveDraft();
 }
-$('poBox').onclick=e=>{const b=e.target.closest('[data-g]');if(!b)return;const g=b.dataset.g,n=b.dataset.n;cur[g]=cur[g]||{};const v=Math.max(0,(cur[g][n]||0)+ +b.dataset.d);if(v)cur[g][n]=v;else delete cur[g][n];drawPO()};
+$('poBox').onclick=e=>{const b=e.target.closest('[data-g]');if(!b)return;const g=b.dataset.g,n=b.dataset.n;cur[g]=cur[g]||{};const v=Math.max(0,(cur[g][n]||0)+ +b.dataset.d);if(v)cur[g][n]=v;else delete cur[g][n];drawPO();saveDraft()};
 $('poBox').addEventListener('click',e=>{const b=e.target.closest('[data-pt]');if(!b)return;if(!cur.time){toast('⏰ 예약 시간을 먼저 골라주세요');return}const g=b.dataset.pt,m=+b.dataset.m;if(cur[g+'O']===m){cur[g+'O']=null;cur[g+'T']=''}else cur[g+'O']=m;drawPO()});
 $('poBox').addEventListener('change',e=>{const i=e.target.closest('[data-pti]');if(!i)return;const g=i.dataset.pti;cur[g+'T']=i.value;cur[g+'O']=null;drawPO()});
 $('opener').onclick=()=>{cur.opener=!cur.opener;drawPO()};
@@ -438,19 +452,20 @@ function draw(){
   $('rqChips').innerHTML=REQ.map(q=>`<button class="chip lav${cur.req.includes(q)?' on':''}" data-q="${q}">${q}<span class="en">${REQ_EN[q]}</span></button>`).join('');
   $('editBar').classList.toggle('show',!!editId);$('editTxt').textContent=editId?`✏️ ${cur.name}님 예약 고치는 중`:'';
   $('btnDel').style.display=editId?'':'none';
+  saveDraft();
 }
 $('dChips').onclick=e=>{const b=e.target.closest('[data-d]');if(!b)return;if(b.dataset.d==='other'){const i=$('fDate');i.style.display='block';try{i.showPicker()}catch(x){i.focus()}return}cur.date=b.dataset.d;$('fDate').style.display='none';draw()};
 $('fDate').onchange=e=>{if(e.target.value){cur.date=e.target.value;e.target.style.display='none';draw()}};
 $('tChips').onclick=e=>{const b=e.target.closest('[data-t]');if(!b)return;if(b.dataset.t==='other'){const i=$('fTime');i.style.display='block';try{i.showPicker()}catch(x){i.focus()}return}cur.time=b.dataset.t;$('fTime').style.display='none';draw()};
 $('fTime').onchange=e=>{if(e.target.value){cur.time=e.target.value;e.target.style.display='none';draw()}};
-$('fName').oninput=e=>cur.name=e.target.value.trim();
+$('fName').oninput=e=>{cur.name=e.target.value.trim();saveDraft()};
 const fmtTel=v=>{const d=v.replace(/\D/g,'').slice(0,11);return d.length<4?d:d.length<8?d.slice(0,3)+'-'+d.slice(3):d.slice(0,3)+'-'+d.slice(3,d.length-4)+'-'+d.slice(-4)};
-$('fTel').oninput=e=>{e.target.value=fmtTel(e.target.value);cur.tel=e.target.value};
-$('fMemo').oninput=e=>cur.memo=e.target.value.trim();
-document.querySelector('.stp').onclick=e=>{const b=e.target.closest('[data-p]');if(!b)return;cur.pax=Math.max(1,Math.min(200,cur.pax+ +b.dataset.p));$('pax').value=cur.pax;drawFloor()};
+$('fTel').oninput=e=>{e.target.value=fmtTel(e.target.value);cur.tel=e.target.value;saveDraft()};
+$('fMemo').oninput=e=>{cur.memo=e.target.value.trim();saveDraft()};
+document.querySelector('.stp').onclick=e=>{const b=e.target.closest('[data-p]');if(!b)return;cur.pax=Math.max(1,Math.min(200,cur.pax+ +b.dataset.p));$('pax').value=cur.pax;drawFloor();saveDraft()};
 // 숫자 직접 입력: 누르면 전체 선택돼서 바로 새 숫자 입력
 $('pax').onfocus=e=>setTimeout(()=>e.target.select(),0);
-$('pax').oninput=e=>{const v=e.target.value.replace(/\D/g,'').slice(0,3);e.target.value=v;if(+v>0){cur.pax=+v;drawFloor()}};
+$('pax').oninput=e=>{const v=e.target.value.replace(/\D/g,'').slice(0,3);e.target.value=v;if(+v>0){cur.pax=+v;drawFloor();saveDraft()}};
 $('pax').onblur=e=>{e.target.value=cur.pax};
 $('tbChips').onclick=e=>{const b=e.target.closest('[data-n]');if(!b)return;const n=+b.dataset.n;
   if(b.classList.contains('x')&&!confirm(`${n}번은 같은 날 다른 예약이 있어요. 그래도 고를까요?`))return;
@@ -477,7 +492,7 @@ $('btnSave').onclick=()=>{
 };
 $('btnDel').onclick=()=>{if(!admin)return;if(!confirm('이 예약을 지울까요?'))return;cloudDel(editId);list=list.filter(r=>r.id!==editId);put(KEY,list);count();reset();toast('🗑 지웠어요')};
 $('btnNew').onclick=reset;
-function reset(){editId=null;cur=blank();draw();scrollTo({top:0,behavior:'smooth'})}
+function reset(){editId=null;cur=blank();clearDraft();draw();scrollTo({top:0,behavior:'smooth'})}
 
 /* 목록 */
 let calM=null,selDay=null;
